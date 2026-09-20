@@ -7,6 +7,8 @@ import aiohttp
 from .const import ACTIVITY_PATH, HEALTH_RECORD_PATH, OAUTH_AUTHORIZE_URL, OAUTH_TOKEN_URL, SLEEP_DATA_TYPE
 from .exceptions import HuaweiHealthApiError,HuaweiHealthAuthError,HuaweiHealthConnectionError
 from .models import HuaweiCalendarItem
+import logging
+_LOGGER = logging.getLogger(__name__)
 
 ACTIVITY_NAMES={1:"Marche",2:"Course",3:"Vélo",4:"Natation",5:"Randonnée",6:"Entraînement",7:"Escalade",8:"Ski",9:"Rameur",10:"Elliptique"}
 SLEEP_NAMES={1:"Sommeil TruSleep",2:"Sommeil",3:"Sieste"}
@@ -17,7 +19,9 @@ class HuaweiHealthClient:
  def authorization_url(self,scopes:list[str],state:str)->str:
   return f"{OAUTH_AUTHORIZE_URL}?{urlencode({'response_type':'code','client_id':self.client_id,'redirect_uri':self.redirect_uri,'scope':' '.join(scopes),'access_type':'offline','state':state})}"
  async def exchange_code(self,code:str)->dict[str,Any]:
-  return await self._token_request({'grant_type':'authorization_code','code':code,'client_id':self.client_id,'client_secret':self.client_secret,'redirect_uri':self.redirect_uri})
+  token = await self._token_request({'grant_type':'authorization_code','code':code,'client_id':self.client_id,'client_secret':self.client_secret,'redirect_uri':self.redirect_uri})
+  _LOGGER.warning("HUAWEI TOKEN=%s", token)
+  return token
  async def refresh_token(self,token:str)->dict[str,Any]:
   return await self._token_request({'grant_type':'refresh_token','refresh_token':token,'client_id':self.client_id,'client_secret':self.client_secret})
  async def _token_request(self,data):
