@@ -1,7 +1,7 @@
 {
   "domain": "huawei_health",
   "name": "Huawei Health",
-  "version": "0.2.7",
+  "version": "0.2.8",
   "documentation": "https://github.com/mrjulien44/Huawei_Health",
   "issue_tracker": "https://github.com/mrjulien44/Huawei_Health/issues",
   "codeowners": [

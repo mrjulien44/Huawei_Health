@@ -33,78 +33,263 @@
 #   if user_input is not None:return self.async_create_entry(title='',data=user_input)
 #   o=self.e.options;return self.async_show_form(step_id='init',data_schema=vol.Schema({vol.Required(CONF_ENABLE_ACTIVITIES,default=o.get(CONF_ENABLE_ACTIVITIES,True)):bool,vol.Required(CONF_ENABLE_SLEEP,default=o.get(CONF_ENABLE_SLEEP,True)):bool,vol.Required(CONF_ENABLE_NAPS,default=o.get(CONF_ENABLE_NAPS,True)):bool,vol.Required(CONF_HISTORY_DAYS,default=o.get(CONF_HISTORY_DAYS,30)):vol.All(int,vol.Range(min=1,max=365))}))
 
-from datetime import timedelta
+"""Config flow for Huawei Health."""
+
+from __future__ import annotations
+
 import logging
+import secrets
 
-from homeassistant.helpers.update_coordinator import (
-    DataUpdateCoordinator,
-    UpdateFailed,
+import voluptuous as vol
+
+from homeassistant import config_entries
+from homeassistant.const import (
+    CONF_CLIENT_ID,
+    CONF_CLIENT_SECRET,
+    CONF_NAME,
 )
-from homeassistant.util import dt as dt_util
 
-from .const import DEFAULT_SCAN_INTERVAL
+from homeassistant.helpers.aiohttp_client import async_get_clientsession
+
+from .api import HuaweiHealthClient
+from .const import (
+    ACTIVITY_SCOPE,
+    CONF_ACCESS_TOKEN,
+    CONF_ENABLE_ACTIVITIES,
+    CONF_ENABLE_NAPS,
+    CONF_ENABLE_SLEEP,
+    CONF_EXPIRES_AT,
+    CONF_HISTORY_DAYS,
+    CONF_REDIRECT_URI,
+    CONF_REFRESH_TOKEN,
+    CONF_REGION,
+    DEFAULT_HISTORY_DAYS,
+    DEFAULT_NAME,
+    DEFAULT_REGION,
+    DOMAIN,
+    REGION_API_BASE,
+    SLEEP_SCOPE,
+)
 from .exceptions import HuaweiHealthError
-from .models import HuaweiHealthData
 
 _LOGGER = logging.getLogger(__name__)
 
 
-class HuaweiHealthCoordinator(
-    DataUpdateCoordinator[HuaweiHealthData]
+class HuaweiHealthConfigFlow(
+    config_entries.ConfigFlow,
+    domain=DOMAIN,
 ):
-    def __init__(self, hass, entry, client):
-        super().__init__(
-            hass,
-            _LOGGER,
-            name="Huawei Health",
-            update_interval=DEFAULT_SCAN_INTERVAL,
+    """Handle a Huawei Health config flow."""
+
+    VERSION = 1
+
+    def __init__(self) -> None:
+        """Initialize flow."""
+        self._credentials: dict = {}
+        self._state: str = ""
+        self._auth_url: str = ""
+
+    async def async_step_user(self, user_input=None):
+        """Initial step."""
+
+        if user_input is not None:
+            self._credentials = dict(user_input)
+
+            self._state = secrets.token_urlsafe(24)
+
+            client = HuaweiHealthClient(
+                async_get_clientsession(self.hass),
+                user_input[CONF_CLIENT_ID],
+                user_input[CONF_CLIENT_SECRET],
+                user_input[CONF_REDIRECT_URI],
+                REGION_API_BASE[user_input[CONF_REGION]],
+            )
+
+            self._auth_url = client.authorization_url(
+                [
+                    "openid",
+                    ACTIVITY_SCOPE,
+                    SLEEP_SCOPE,
+                ],
+                self._state,
+            )
+
+            _LOGGER.debug(
+                "OAuth authorization URL generated for client_id=%s",
+                user_input[CONF_CLIENT_ID],
+            )
+
+            return await self.async_step_authorize()
+
+        return self.async_show_form(
+            step_id="user",
+            data_schema=vol.Schema(
+                {
+                    vol.Required(
+                        CONF_NAME,
+                        default=DEFAULT_NAME,
+                    ): str,
+                    vol.Required(CONF_CLIENT_ID): str,
+                    vol.Required(CONF_CLIENT_SECRET): str,
+                    vol.Required(CONF_REDIRECT_URI): str,
+                    vol.Required(
+                        CONF_REGION,
+                        default=DEFAULT_REGION,
+                    ): vol.In(REGION_API_BASE),
+                }
+            ),
         )
 
-        self.entry = entry
-        self.client = client
+    async def async_step_authorize(self, user_input=None):
+        """Handle authorization code exchange."""
 
-    async def _async_update_data(self):
-        now = dt_util.now()
+        errors = {}
 
-        start = now - timedelta(
-            days=int(
-                self.entry.options.get(
-                    "history_days",
-                    30,
-                )
+        if user_input is not None:
+            client = HuaweiHealthClient(
+                async_get_clientsession(self.hass),
+                self._credentials[CONF_CLIENT_ID],
+                self._credentials[CONF_CLIENT_SECRET],
+                self._credentials[CONF_REDIRECT_URI],
+                REGION_API_BASE[
+                    self._credentials[CONF_REGION]
+                ],
             )
+
+            try:
+                token_data = await client.exchange_code(
+                    user_input["authorization_code"]
+                )
+
+                access_token = token_data.get("access_token")
+
+                if not access_token:
+                    raise HuaweiHealthError(
+                        "Missing access_token in OAuth response"
+                    )
+
+            except HuaweiHealthError as err:
+                _LOGGER.exception(
+                    "Huawei OAuth authorization failed: %s",
+                    err,
+                )
+
+                errors["base"] = "cannot_connect"
+
+            else:
+                await self.async_set_unique_id(
+                    f"huawei_health_{self._credentials[CONF_CLIENT_ID]}"
+                )
+                self._abort_if_unique_id_configured()
+
+                entry_data = {
+                    **self._credentials,
+                    CONF_ACCESS_TOKEN: access_token,
+                    CONF_REFRESH_TOKEN: token_data.get(
+                        "refresh_token"
+                    ),
+                    CONF_EXPIRES_AT: token_data.get(
+                        "expires_at",
+                        token_data.get("expires_in"),
+                    ),
+                }
+
+                _LOGGER.info(
+                    "Huawei Health account successfully linked"
+                )
+
+                return self.async_create_entry(
+                    title=self._credentials[CONF_NAME],
+                    data=entry_data,
+                    options={
+                        CONF_ENABLE_ACTIVITIES: True,
+                        CONF_ENABLE_SLEEP: True,
+                        CONF_ENABLE_NAPS: True,
+                        CONF_HISTORY_DAYS: DEFAULT_HISTORY_DAYS,
+                    },
+                )
+
+        return self.async_show_form(
+            step_id="authorize",
+            description_placeholders={
+                "authorization_url": self._auth_url,
+            },
+            data_schema=vol.Schema(
+                {
+                    vol.Required(
+                        "authorization_code"
+                    ): str
+                }
+            ),
+            errors=errors,
         )
 
-        end = now + timedelta(days=1)
+    @staticmethod
+    def async_get_options_flow(config_entry):
+        """Get options flow."""
+        return HuaweiHealthOptionsFlow(config_entry)
 
-        try:
-            #
-            # ACTIVITÉS UNIQUEMENT
-            #
-            activities = (
-                await self.client.async_get_activities(
-                    start,
-                    end,
-                )
-                if self.entry.options.get(
-                    "enable_activities",
-                    True,
-                )
-                else []
+
+class HuaweiHealthOptionsFlow(
+    config_entries.OptionsFlow
+):
+    """Huawei Health options flow."""
+
+    def __init__(self, config_entry):
+        self._config_entry = config_entry
+
+    async def async_step_init(
+        self,
+        user_input=None,
+    ):
+        """Manage options."""
+
+        if user_input is not None:
+            return self.async_create_entry(
+                title="",
+                data=user_input,
             )
 
-            #
-            # DÉSACTIVÉ TEMPORAIREMENT
-            # Les comptes Huawei individuels
-            # semblent être bloqués sur les
-            # données sommeil (403 scopes).
-            #
-            sleep = []
+        options = self._config_entry.options
 
-            return HuaweiHealthData(
-                activities=activities,
-                sleep=sleep,
-            )
-
-        except HuaweiHealthError as exc:
-            raise UpdateFailed(str(exc)) from exc
+        return self.async_show_form(
+            step_id="init",
+            data_schema=vol.Schema(
+                {
+                    vol.Required(
+                        CONF_ENABLE_ACTIVITIES,
+                        default=options.get(
+                            CONF_ENABLE_ACTIVITIES,
+                            True,
+                        ),
+                    ): bool,
+                    vol.Required(
+                        CONF_ENABLE_SLEEP,
+                        default=options.get(
+                            CONF_ENABLE_SLEEP,
+                            True,
+                        ),
+                    ): bool,
+                    vol.Required(
+                        CONF_ENABLE_NAPS,
+                        default=options.get(
+                            CONF_ENABLE_NAPS,
+                            True,
+                        ),
+                    ): bool,
+                    vol.Required(
+                        CONF_HISTORY_DAYS,
+                        default=options.get(
+                            CONF_HISTORY_DAYS,
+                            DEFAULT_HISTORY_DAYS,
+                        ),
+                    ): vol.All(
+                        int,
+                        vol.Range(
+                            min=1,
+                            max=365,
+                        ),
+                    ),
+                }
+            ),
+        )
