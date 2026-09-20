@@ -1,0 +1,64 @@
+name: Validate and publish HACS integration
+
+on:
+  push:
+    branches:
+      - main
+    tags:
+      - "v*.*.*"
+
+  pull_request:
+    branches:
+      - main
+
+  schedule:
+    - cron: "0 0 * * *"
+
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: hacs-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  INTEGRATION_DOMAIN: huawei_health
+  INTEGRATION_PATH: custom_components/huawei_health
+  MANIFEST_PATH: custom_components/huawei_health/manifest.json
+  RELEASE_FILENAME: huawei_health.zip
+
+jobs:
+  validate-structure:
+    name: Validate repository structure
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Validate required files
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          required_files=(
+            "README.md"
+            "hacs.json"
+            "${MANIFEST_PATH}"
+            "${INTEGRATION_PATH}/__init__.py"
+            "${INTEGRATION_PATH}/api.py"
+            "${INTEGRATION_PATH}/calendar.py"
+            "${INTEGRATION_PATH}/config_flow.py"
+            "${INTEGRATION_PATH}/const.py"
+            "${INTEGRATION_PATH}/coordinator.py"
+            "${INTEGRATION_PATH}/strings.json"
+          )
+
+        

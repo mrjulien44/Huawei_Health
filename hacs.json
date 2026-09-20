@@ -1,5 +1,7 @@
 {
   "name": "Huawei Health",
-  "content_in_root": false,
-  "render_readme": true
+  "homeassistant": "2026.8.0",
+  "render_readme": true,
+  "zip_release": true,
+  "filename": "huawei_health-v{version}.zip"
 }
