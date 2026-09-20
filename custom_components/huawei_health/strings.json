@@ -1,0 +1,43 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Connexion Huawei Health",
+        "description": "Identifiants de l’application Huawei.",
+        "data": {
+          "name": "Nom",
+          "client_id": "Client ID",
+          "client_secret": "Client secret",
+          "redirect_uri": "URI de redirection",
+          "region": "Région"
+        }
+      },
+      "authorize": {
+        "title": "Autorisation Huawei",
+        "description": "Ouvrez {authorization_url}, autorisez l’accès, puis collez le code.",
+        "data": {
+          "authorization_code": "Code d’autorisation"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Connexion impossible"
+    },
+    "abort": {
+      "already_configured": "Déjà configuré"
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Options",
+        "data": {
+          "enable_activities": "Activités",
+          "enable_sleep": "Sommeil",
+          "enable_naps": "Siestes",
+          "history_days": "Historique en jours"
+        }
+      }
+    }
+  }
+}
